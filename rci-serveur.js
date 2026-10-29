@@ -28,6 +28,9 @@
 
   /* ---------- Copie locale (IndexedDB) ---------- */
   var IDB = null, CLE = 'u:' + COMPTE.id + ':';
+  // Suivi des écarts (/ecarts/) tourne à côté de RCI sur le même serveur : sa réserve de saisies a sa propre clé,
+  // pour que les deux applications ouvertes en même temps n'écrasent pas la réserve l'une de l'autre.
+  var FILE = /^\/ecarts(\/|$)/.test(location.pathname) ? 'file-ecarts' : 'file';
   function base() {
     if (IDB) return IDB;
     IDB = new Promise(function (ok, ko) {
@@ -52,7 +55,7 @@
   }
   function effacerLocal() {
     var p1 = base().then(function (d) {
-      return new Promise(function (ok) { var t = d.transaction('kv', 'readwrite'), s = t.objectStore('kv'); ['snap', 'file', 'verrou', 'vu', 'prep'].forEach(function (k) { s.delete(CLE + k); }); t.oncomplete = function () { ok(); }; t.onerror = function () { ok(); }; });
+      return new Promise(function (ok) { var t = d.transaction('kv', 'readwrite'), s = t.objectStore('kv'); ['snap', 'file', 'file-ecarts', 'verrou', 'vu', 'prep'].forEach(function (k) { s.delete(CLE + k); }); t.oncomplete = function () { ok(); }; t.onerror = function () { ok(); }; });
     }, function () {});
     var p2 = window.caches ? Promise.all(['rci-pages', 'rci-blobs'].map(function (n) { return caches.delete(n).catch(function () {}); })) : Promise.resolve();
     try { Object.keys(localStorage).forEach(function (k) { if (k.indexOf('rci_brouillons_') === 0 || k === 'rci_dernier_ecart' || k === 'rci_vues') localStorage.removeItem(k); }); } catch (e) {}
@@ -227,11 +230,11 @@
   var tFile = null;
   function sauverFile() {
     clearTimeout(tFile); tFile = null;
-    return ecrireLocal('file', enVolOps.concat(file.map(function (x) { return x.op; })).concat(conflits.map(function (x) { var o = copie(x.op); o.conflit = true; return o; })));
+    return ecrireLocal(FILE, enVolOps.concat(file.map(function (x) { return x.op; })).concat(conflits.map(function (x) { var o = copie(x.op); o.conflit = true; return o; })));
   }
   function sauverFileBientot() { if (!tFile) tFile = setTimeout(sauverFile, 300); }
   function restaurerFile() {
-    return lireLocal('file').then(function (L) {
+    return lireLocal(FILE).then(function (L) {
       (L || []).forEach(function (op) {
         var k = op.c + '/' + op.id; ENCOURS[k] = (ENCOURS[k] || 0) + 1;
         var x = { op: op, ok: function () {}, ko: function () {} };

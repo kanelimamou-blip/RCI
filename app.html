@@ -3079,6 +3079,7 @@ function strip(o){var c={};for(var k in o){if(k!=='id')c[k]=o[k]}return c}
 
 /* ---------- Données ---------- */
 function put(coll,obj,quiet){
+  if(coll==='ecarts'&&obj&&obj.se){toast('Cet écart vient de Suivi des écarts : il se traite dans cette application, RCI se met à jour tout seul.');return Promise.resolve(false)}
   dataChanged();camusat(coll,obj);obj.maj=new Date().toISOString();if(S.uid){obj.par=S.uid;if(!obj.creePar)obj.creePar=S.uid}
   var id=obj.id,data=strip(obj);
   if(S.db){
@@ -3091,6 +3092,7 @@ function put(coll,obj,quiet){
   persist();if(!quiet)render();return Promise.resolve(true);
 }
 function del(coll,id){
+  if(coll==='ecarts'&&/^se:/.test(String(id))){toast('Cet écart vient de Suivi des écarts : il se traite dans cette application.');return Promise.resolve(false)}
   dataChanged();
   if(S.db){return S.db.collection(coll).doc(id).delete().then(function(){return true},function(){toast('Suppression impossible.');return false})}
   S[coll]=S[coll].filter(function(x){return x.id!==id});persist();render();return Promise.resolve(true);
@@ -3111,11 +3113,37 @@ function subscribe(){
   COLLS.forEach(function(coll){
     S.db.collection(coll).onSnapshot(function(sn){
       var cp=_cpW[coll]||(_cpW[coll]=new WeakMap());S[coll]=sn.docs.map(function(d){var raw=d.data(),o=raw&&typeof raw==='object'?cp.get(raw):null;if(!o){o=JSON.parse(JSON.stringify(raw));if(raw&&typeof raw==='object')cp.set(raw,o)}o.id=d.id;return o});
+      if(coll==='ecarts'){S._ecR=S.ecarts;S.ecarts=seFusion()}
       got[coll]=1;if(!S.ready&&COLLS.every(function(c){return got[c]})){S.ready=true;purgeShared();seedServeur();brCharger();openTabParam();render();openHash()}
       if(S.ready){if(S.canWrite&&(coll==='ecarts'||coll==='maint')){camusatAll().forEach(function(p){if(p[0]===coll)S.db.collection(coll).doc(p[1].id).set(strip(p[1]))})}onData();resolveNames()}
     },function(e){toast('Connexion aux données partagées interrompue. Rechargez la page.')});
   });
+  seAbonner();
 }
+
+/* ---------- Suivi des écarts : base de référence des écarts ----------
+   L'application Suivi des écarts (réception, qualification, affectation, contrôle des corrections) écrit ses écarts
+   dans la collection « se_ecarts » de la même base. RCI la lit et s'aligne dessus : un écart de RCI qui porte la même
+   référence (Ecart_N, ou MQ:Ecart_N pour la maquette) est remplacé par la version de Suivi des écarts. Ces écarts sont
+   en lecture seule dans RCI : ils se traitent dans Suivi des écarts et RCI se met à jour seul. */
+var SE_COLL='se_ecarts';S._ecR=[];S._se=[];
+function seGrav(p){return p==='P1'?'Critique':p==='P3'||p==='P4'?'Mineure':'Majeure'}
+function seStatut(s){return s==='SOLDE'?'Clos':s==='EN COURS'?'En cours':'Ouvert'}
+function seVers(x){var act=x.act==='actif'?'actif':'passif',P=PREST_FIX[act]||prestOf(act),site=String(x.site||'').trim()||'Site non renseigné',st=seStatut(x.statut),fam=x.famille||'',sf=x.sousFamille||'',cr=String(x.creeLe||'').slice(0,10);
+  var obs=[x.commentaire,x.priorite?'Priorité '+x.priorite:'',x.statut==='À affecter'?'À affecter au prestataire':'',x.lot?'Lot '+x.lot:'',x.accuseLe?'Accusé de réception le '+fmt(x.accuseLe):'',x.corrDeclaree&&st!=='Clos'?'Correction déclarée le '+fmt(x.corrDeclaree)+', à contrôler':''].filter(Boolean).join(' · ');
+  var o={id:'se:'+x.id,se:1,n:0,ref:x.ref||x.id,refExt:x.ref||'',type:act,site:site,siteNom:x.siteNom||'',region:x.region||PREG[site.slice(0,3).toUpperCase()]||'',zone:x.zone||'',
+    rubrique:(fam||'Contrôle')+(sf&&sf!==fam?' › '+sf:''),famille:fam,sousFamille:sf,point:x.point||'',obs:obs,gravite:seGrav(x.priorite),priorite:x.priorite||'',origine:x.origine||'',
+    responsable:P,prestataire:P,echeance:x.echeance||'',statut:st,preuve:st==='Clos'?'Soldé'+(x.dateCorrection?' le '+fmt(x.dateCorrection):'')+' (Suivi des écarts)':'',ficheId:'',
+    creeLe:/^\d{4}-\d{2}-\d{2}$/.test(cr)?cr+'T00:00:00.000Z':(x.creeLe||''),ph:[],hist:[],maj:x.maj||''};
+  if(st==='Clos')o.cloLe=x.dateCorrection||String(x.maj||'').slice(0,10);
+  return o}
+function seFusion(){var R=S._ecR||[];if(!S._se.length)return R;
+  var L=S._se.filter(function(x){return x&&!x.exemple&&x.statut!=='Fusionné'&&x.point}).map(seVers),cle={};
+  L.forEach(function(e){if(e.refExt){cle[low(e.refExt)]=1;cle['mq:'+low(e.refExt)]=1}});
+  return R.filter(function(e){return !(e.refExt&&cle[low(e.refExt)])}).concat(L)}
+function seAbonner(){if(!S.db)return;
+  S.db.collection(SE_COLL).onSnapshot(function(sn){S._se=sn.docs.map(function(d){var o=JSON.parse(JSON.stringify(d.data()||{}));o.id=d.id;return o});S.ecarts=seFusion();if(S.ready)onData()},function(){})}
+function seNote(){var n=S.ecarts.filter(function(e){return e.se}).length;return n?'<div class="note-prov" style="margin:0 0 14px"><b>'+n+' écart'+(n>1?'s':'')+' de Suivi des écarts</b>, l’application de référence : ils se reçoivent, s’affectent et se clôturent là-bas, RCI les reprend automatiquement et en lecture seule.</div>':''}
 function setMode(){
   var m=$('#mode');
   if(S.db){m.textContent=modeTxt();m.className='mode on'+(S.hl&&!S.hl.enLigne?' hl':'')}
@@ -3346,7 +3374,7 @@ function viewReg(){
    '<label class="f">Gravité<select id="fl-gr" data-fl="gr">'+opt(GRAV,f.gr,'Toutes')+'</select></label>'+(function(){var F={};S.ecarts.forEach(function(e){if(e.famille)F[famOf(e)]=1});var L0=Object.keys(F).sort();return L0.length?'<label class="f">Famille<select id="fl-fam" data-fl="fam">'+opt(L0,f.fam||'','Toutes')+'</select></label>':''})()+'<label class="f">Cause<select id="fl-cause" data-fl="cause">'+opt(CAUSES.concat(['Non renseignée']),f.cause||'','Toutes')+'</select></label>'+(S.uid?'<label class="f chk"><span><input type="checkbox" id="fl-mine" data-flmine="1"'+(f.mine?' checked':'')+'> Seulement mes écarts</span></label>':'')+
    '<label class="f">Recherche<input type="text" id="fl-q" data-fl="q" value="'+esc(f.q)+'" placeholder="Site, nom, réf., prestataire… (plusieurs mots possibles)"></label>'+
    '</div></div>';
-  h+=vuesHTML();
+  h+=vuesHTML()+seNote();
   h+='<div class="bar-actions" style="justify-content:space-between"><span class="muted">'+L.length+' écart'+(L.length>1?'s':'')+' affiché'+(L.length>1?'s':'')+(S.canWrite&&L.length?' <button class="btn sm" data-act="selTous" style="margin-left:6px">Tout sélectionner ('+L.length+')</button>':'')+'</span>'+
      '<span class="bar-actions"><button class="btn sm" data-act="impEcarts">Importer des écarts</button><button class="btn sm" data-act="toggleNew">'+(S.showNew?'Fermer':'Ajouter un écart')+'</button>'+(S.dl?'<button class="btn sm" data-act="csv">Exporter en CSV</button><button class="btn sm" data-act="regXlsx">Exporter en Excel (sélection)</button>':'')+'</span></div>';
   if(S.showNew){
@@ -6260,7 +6288,7 @@ document.addEventListener('click',function(ev){
   if(b.dataset.rmph){var q=b.dataset.rmph.split(':'),kk=q[0],ii=+q[1];ptPatch(kk,function(v){(v.ph||[]).splice(ii,1)});document.getElementById('th-'+kk).innerHTML=thumbsHTML(kk,draft().pts[kk].ph);return}
   var a=b.dataset.act;if(!a)return;
   if(a==='saveFiche')saveFiche();
-  else if(a==='backup')S.dl.save({filename:'sauvegarde-RCI-'+today()+'.json',data:JSON.stringify(COLLS.reduce(function(o,c){o[c]=S[c];return o},{v2:true,v3:true})),mime:'application/json'}).then(function(){try{localStorage.setItem('rci_last_backup',today())}catch(e){}toast('Sauvegarde créée.');if(S.tab==='bord')render()},function(){toast('Sauvegarde impossible.')});
+  else if(a==='backup')S.dl.save({filename:'sauvegarde-RCI-'+today()+'.json',data:JSON.stringify(COLLS.reduce(function(o,c){o[c]=c==='ecarts'?S[c].filter(function(e){return !e.se}):S[c];return o},{v2:true,v3:true})),mime:'application/json'}).then(function(){try{localStorage.setItem('rci_last_backup',today())}catch(e){}toast('Sauvegarde créée.');if(S.tab==='bord')render()},function(){toast('Sauvegarde impossible.')});
   else if(a==='resetFiche'){delete S.drafts[curTpl()];render()}
   else if(a==='volGo'){S.vol=S.vol||{};S.vol[S.type]=b.dataset.v;render();window.scrollTo(0,0)}
   else if(a==='toggleNew'){S.showNew=!S.showNew;if(S.showNew&&!S.newE.site){try{var dz=JSON.parse(localStorage.getItem('rci_dernier_ecart')||'null');if(dz)S.newE=Object.assign({},dz,S.newE)}catch(e){}}render();setTimeout(function(){var x=document.getElementById(S.newE.site?'ne-pt':'ne-site');if(x)x.focus()},0)}
@@ -6347,7 +6375,7 @@ function initAI(){aiUseKey();var c=window.claude;if(c&&c.use){c.use('sample').th
 var PURGE='p26';
 function keepDoc(c,x){return (c==='sites'&&!x.exemple&&!/^sx/.test(String(x.id)))||c==='boqcfg'||c==='boqa'}
 function purgeLocal(r){if(r&&r.purge===PURGE)return false;COLLS.forEach(function(c){S[c]=(S[c]||[]).filter(function(x){return keepDoc(c,x)})});S.v2=S.v3=S.v4=true;return true}
-function purgeShared(){if(!S.canWrite||S.reglages.some(function(x){return x.id==='purge-'+PURGE}))return;var W=[];COLLS.forEach(function(c){S[c].forEach(function(x){if(!keepDoc(c,x))W.push([c,x.id])})});
+function purgeShared(){if(!S.canWrite||S.reglages.some(function(x){return x.id==='purge-'+PURGE}))return;var W=[];COLLS.forEach(function(c){S[c].forEach(function(x){if(!keepDoc(c,x)&&!x.se)W.push([c,x.id])})});
   try{localStorage.setItem('rci_migrated','1')}catch(e){}
   Promise.all(W.map(function(w){return S.db.collection(w[0]).doc(w[1]).delete().catch(function(){})})).then(function(){return S.db.collection('reglages').doc('purge-'+PURGE).set({id:'purge-'+PURGE,le:new Date().toISOString()})}).then(function(){if(W.length)toast('Bases vidées : '+W.length+' éléments retirés (sites et BoQ conservés).')},function(){})}
 function seedServeur(){if(!SRV||!S.canWrite||S.sites.length||S.reglages.some(function(x){return x.id==='seed-sites'}))return;ebLoad();if(!EB.sites.length)return;var now=new Date().toISOString();
