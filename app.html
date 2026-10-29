@@ -524,7 +524,7 @@ body.mob .hub-g{grid-template-columns:1fr}
       <h1>Rapports de contrôle et registre des écarts</h1>
       <div class="sub">Service RCI · contrôle, recette, immobilisation</div>
     </div>
-    <span class="hd-pills"><span class="mode off" id="net" hidden></span><span class="mode" id="mode">Chargement…</span></span>
+    <span class="hd-pills"><span class="mode off" id="net" hidden></span><span class="mode" id="mode">Chargement…</span><a class="btn sm" id="versSE" href="/ecarts/" hidden>Suivi des écarts</a></span>
   </header>
   <nav id="nav" role="tablist" aria-label="Rubriques"></nav>
   <div id="subnav" class="subnav" role="tablist" aria-label="Pages"></div>
@@ -3134,7 +3134,7 @@ function seVers(x){var act=x.act==='actif'?'actif':'passif',P=PREST_FIX[act]||pr
   var o={id:'se:'+x.id,se:1,n:0,ref:x.ref||x.id,refExt:x.ref||'',type:act,site:site,siteNom:x.siteNom||'',region:x.region||PREG[site.slice(0,3).toUpperCase()]||'',zone:x.zone||'',
     rubrique:(fam||'Contrôle')+(sf&&sf!==fam?' › '+sf:''),famille:fam,sousFamille:sf,point:x.point||'',obs:obs,gravite:seGrav(x.priorite),priorite:x.priorite||'',origine:x.origine||'',
     responsable:P,prestataire:P,echeance:x.echeance||'',statut:st,preuve:st==='Clos'?'Soldé'+(x.dateCorrection?' le '+fmt(x.dateCorrection):'')+' (Suivi des écarts)':'',ficheId:'',
-    creeLe:/^\d{4}-\d{2}-\d{2}$/.test(cr)?cr+'T00:00:00.000Z':(x.creeLe||''),ph:[],hist:[],maj:x.maj||''};
+    creeLe:/^\d{4}-\d{2}-\d{2}$/.test(cr)?cr+'T00:00:00.000Z':(x.creeLe||''),ph:(x.photos||[]).map(function(p){return p&&p.url}).filter(Boolean),hist:[],maj:x.maj||''};
   if(st==='Clos')o.cloLe=x.dateCorrection||String(x.maj||'').slice(0,10);
   return o}
 function seFusion(){var R=S._ecR||[];if(!S._se.length)return R;
@@ -3142,9 +3142,58 @@ function seFusion(){var R=S._ecR||[];if(!S._se.length)return R;
   L.forEach(function(e){if(e.refExt){cle[low(e.refExt)]=1;cle['mq:'+low(e.refExt)]=1}});
   return R.filter(function(e){return !(e.refExt&&cle[low(e.refExt)])}).concat(L)}
 function seAbonner(){if(!S.db)return;
+  S.db.collection('se_reglages').onSnapshot(function(sn){var P=null,F={};sn.docs.forEach(function(d){var o=d.data()||{};if(d.id==='pont')P=o;else if(/^mi-fait-/.test(d.id))F[o.mission]=o});S._pont=P;S._miFait=F;S._memo=null;if(S.ready)render()},function(){});
   S.db.collection(SE_COLL).onSnapshot(function(sn){S._se=sn.docs.map(function(d){var o=JSON.parse(JSON.stringify(d.data()||{}));o.id=d.id;return o});S.ecarts=seFusion();if(S.ready)onData()},function(){})}
-function seNote(){var n=S.ecarts.filter(function(e){return e.se}).length;return n?'<div class="note-prov" style="margin:0 0 14px"><b>'+n+' écart'+(n>1?'s':'')+' de Suivi des écarts</b>, l’application de référence : ils se reçoivent, s’affectent et se clôturent là-bas, RCI les reprend automatiquement et en lecture seule.</div>':''}
+function seNote(){var n=S.ecarts.filter(function(e){return e.se}).length;return n?'<div class="note-prov" style="margin:0 0 14px"><b>'+n+' écart'+(n>1?'s':'')+' de Suivi des écarts</b>, l’application de référence : ils se reçoivent, s’affectent et se clôturent là-bas, RCI les reprend automatiquement et en lecture seule. Plus besoin d’importer la base Excel des écarts. Les points non conformes d’un rapport RCI y partent automatiquement, « à affecter ».</div>':''}
+
+/* ---------- Pont avec Suivi des écarts ----------
+   Suivi des écarts publie dans se_reglages/pont un résumé : chiffres, missions du mois, indicateurs PASSIF/ACTIF,
+   journal, rappels, objectifs, incidents. RCI l'affiche (bandeau, Ma journée, fiche site) et renvoie vers
+   /ecarts/#… pour agir. Une fiche RCI enregistrée coche la mission du site (se_reglages/mi-fait-…) et envoie ses
+   points non conformes dans Suivi des écarts, « à affecter ». */
+function seOn(){return !!(SRV&&(S._pont||S._se.length))}
+function seUrl(h){return '/ecarts/'+(h?'#'+h:'')}
+function seLien(h,lib,cls){return '<a class="btn sm'+(cls?' '+cls:'')+'" href="'+seUrl(h)+'">'+lib+'</a>'}
+function sePrio(g){return g==='Critique'?'P1':g==='Mineure'?'P3':'P2'}
+function seBandeau(){if(!seOn())return '';var P=S._pont,K=P&&P.kpi;
+  if(!K){var O=S._se.filter(function(x){return x.statut!=='SOLDE'&&x.statut!=='Fusionné'&&!x.exemple}),t=today();K={ouverts:O.length,retard:O.filter(function(x){return x.echeance&&x.echeance<t}).length,aCtrl:O.filter(function(x){return x.corrDeclaree}).length,aAff:O.filter(function(x){return x.statut==='À affecter'}).length,p1:O.filter(function(x){return x.priorite==='P1'}).length,p1j:0}}
+  function c(l,v,h,bad){return '<a class="kpi-l" href="'+seUrl(h)+'" style="text-decoration:none;color:inherit;display:block;padding:8px 12px;border:1px solid var(--line);border-radius:10px;min-width:110px"><span class="muted" style="font-size:12px">'+l+'</span><br><b style="font-size:20px'+(bad&&v?';color:var(--bad,#b42318)':'')+'">'+v+'</b></a>'}
+  return '<div class="card"><div class="sumbar"><h2>Écarts · Suivi des écarts</h2>'+seLien('','Ouvrir Suivi des écarts','pri')+'</div><div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:8px">'+
+    c('Ouverts',K.ouverts,'f=ouverts')+c('En retard',K.retard,'f=retard',1)+c('À contrôler',K.aCtrl,'f=controler')+c('À affecter',K.aAff,'f=affecter')+c('P1 ouverts',K.p1,'f=p1',1)+c('P1 du jour',K.p1j,'f=p1',1)+'</div>'+seNouv()+'</div>'}
+// Nouveautés depuis la dernière visite (lues dans Suivi des écarts)
+function seNouv(){var k='rci_se_vu',vu='';try{vu=localStorage.getItem(k)||''}catch(x){}var now=new Date().toISOString();if(!vu){try{localStorage.setItem(k,now)}catch(x){}return ''}
+  var A=0,So=0,Rf=0;S._se.forEach(function(x){if(x.exemple)return;if(String(x.creeLe||'')>vu.slice(0,10)&&x.origineApp!=='historique')A++;(x.suivi||[]).forEach(function(y){if(y.t>vu){if(/→ SOLDE/.test(y.txt))So++;else if(/NON conforme/.test(y.txt))Rf++}})});
+  if(!A&&!So&&!Rf)return '';
+  return '<p class="muted" style="margin:10px 0 0">Depuis votre dernière visite ('+fmt(vu.slice(0,10))+') : <b>'+A+'</b> arrivé(s), <b>'+So+'</b> soldé(s), <b>'+Rf+'</b> correction(s) refusée(s). <button class="btn sm" data-act="seVu">Marquer comme vu</button></p>'}
+function seIndic(){var P=S._pont;if(!SRV||!P||!P.indic)return '';var I=P.indic,O=P.objectifs||{},M=['Janv','Févr','Mars','Avr','Mai','Juin','Juil','Août','Sept','Oct','Nov','Déc'];
+  return '<div class="card"><div class="sumbar"><h2>Indicateurs PASSIF et ACTIF '+I.an+'</h2>'+seLien('tab=tableaux','Détail dans Suivi des écarts')+'</div>'+['passif','actif'].map(function(p){var X=I[p];if(!X)return '';var der=Math.max(X.der||0,1);
+    return '<h3 style="margin:12px 0 6px">'+p.toUpperCase()+'</h3><div style="overflow-x:auto"><table class="tbl"><thead><tr><th></th>'+M.slice(0,der).map(function(m){return '<th>'+m+'</th>'}).join('')+'<th>Total</th></tr></thead><tbody>'+
+      I.lignes.map(function(l){var v=X.v[l[0]]||[];return '<tr><th scope="row" style="text-align:left">'+esc(l[1])+'</th>'+v.slice(1,der+1).concat([v[0]]).map(function(x,i){var ko=l[2]&&x!=null&&O[l[0]]!=null&&x<O[l[0]];return '<td class="mono"'+(ko?' style="color:var(--bad,#b42318);font-weight:700"':'')+'>'+(l[2]?(x==null?'':Math.round(x*100)+' %'):(x||(i<der?'0':'')))+'</td>'}).join('')+'</tr>'}).join('')+'</tbody></table></div>'}).join('')+'</div>'}
+function seJournal(){var P=S._pont;if(!SRV||!P||!P.journal||!P.journal.length)return '';
+  return '<div class="card"><div class="sumbar"><h2>Journal · Suivi des écarts</h2></div>'+P.journal.slice(0,15).map(function(j){return '<div class="row"><div class="main"><span><a href="'+seUrl('e='+encodeURIComponent(j.ref))+'" class="mono">'+esc(j.ref)+'</a> · '+esc(j.site)+'</span><span class="muted">'+esc(j.txt)+'</span></div><span class="muted mono" style="white-space:nowrap">'+fmt(String(j.t).slice(0,10))+'</span></div>'}).join('')+'</div>'}
+function seRappels(){var P=S._pont;if(!SRV||!P||!P.rappels||!P.rappels.length)return '';var t=today();
+  return '<div class="card"><div class="sumbar"><h2>Tâches et rappels</h2>'+seLien('tab=carnet','Tout voir')+'</div>'+P.rappels.slice(0,10).map(function(r){return '<div class="row"><div class="main"><span>'+esc(r.texte)+'</span><span class="muted">'+(r.type==='rappel'?'Rappel':'Tâche')+(r.lien?' · '+esc(r.lien):'')+'</span></div><span class="mono'+(r.date&&r.date<t?' late-t':'')+'">'+(r.date?fmt(r.date):'')+'</span></div>'}).join('')+'</div>'}
+// Missions du mois (piste 28) : celles du pilote connecté, sinon toutes celles des pilotes RCI
+function seMissions(site){var P=S._pont;if(!SRV||!P||!P.missions)return [];var F=S._miFait||{};return P.missions.map(function(m){var o={};for(var k in m)o[k]=m[k];if(!o.fait&&F[o.id]){o.fait=true;o.le=F[o.id].le}return o}).filter(function(m){return !site||low(m.site)===low(site)})}
+function seMesMissions(){var L=seMissions().filter(function(m){return m.mois===today().slice(0,7)&&/^RCI\|/.test(m.aff)}),q=low(moiNom()),mes=L.filter(function(m){return q&&low(m.aff.slice(4))===q});if(mes.length)L=mes;if(!L.length)return '';
+  return '<div class="card"><div class="sumbar"><h2>'+(mes.length?'Mes missions du mois':'Missions RCI du mois')+' · '+L.filter(function(m){return m.fait}).length+' / '+L.length+'</h2>'+seLien('tab=missions','Programme')+'</div>'+L.map(function(m){var s=S.sites.filter(function(x){return low(x.code)===low(m.site)})[0];
+    return '<div class="row"><div class="main"><span><b class="mono">'+esc(m.site)+'</b>'+(mes.length?'':' · '+esc(m.lib))+(m.fait?' · <span style="color:var(--ok,#067647)">faite'+(m.le?' le '+fmt(m.le):'')+'</span>':'')+'</span><span class="muted">'+esc((m.raisons||[]).join(' · '))+'</span></div>'+
+      (m.fait||!S.canWrite?'':'<span class="bar-actions">'+TYPES.map(function(t){return '<button class="btn sm" data-act="siteFiche" data-type="'+t+'" data-code="'+esc(s?s.code:m.site)+'">'+esc(TPL[t].nom)+'</button>'}).join('')+'</span>')+'</div>'}).join('')+'</div>'}
+function seSite(code){if(!seOn())return '';var M=seMissions(code),I=S._pont&&S._pont.incidents&&S._pont.incidents[String(code).toLowerCase().replace(/[^a-z0-9]/g,'')],E=S._se.filter(function(x){return low(x.site)===low(code)&&x.statut!=='SOLDE'&&x.statut!=='Fusionné'});
+  return '<div class="card" style="margin-top:12px"><div class="sumbar"><h2>Suivi des écarts</h2>'+seLien('site='+encodeURIComponent(code),'Fiche du site dans Suivi des écarts')+'</div><div class="dl">'+
+    [['Écarts ouverts',String(E.length)],['Missions',M.map(function(m){return m.mois+' · '+m.lib+' · '+(m.fait?'faite':m.statut)}).join(' ; ')],['Incidents',I?I.occ+' fois, '+I.points+' points sur le nœud ('+I.cat+', '+I.mois+')':'']].filter(function(x){return x[1]}).map(function(x){return '<div><span class="muted">'+x[0]+'</span><b>'+esc(x[1])+'</b></div>'}).join('')+'</div></div>'}
+// Après l'enregistrement d'un rapport : mission cochée, points non conformes envoyés à Suivi des écarts
+function seApresFiche(d,ecs){if(!seOn()||!S.db)return Promise.resolve();var mo=String(d.ident.date||today()).slice(0,7),site=String(d.ident.site||'').trim(),W=[];
+  seMissions(site).forEach(function(m){if(m.mois===mo&&!m.fait)W.push(S.db.collection('se_reglages').doc('mi-fait-'+m.id).set({mission:m.id,site:m.site,le:d.ident.date||today(),src:'Rapport RCI '+(TPL[d.type]?TPL[d.type].nom:''),maj:new Date().toISOString()}))});
+  var n=+(S._pont&&S._pont.maxN)||0;S._se.forEach(function(x){if(+x.n>n)n=+x.n});var now=new Date().toISOString();
+  ecs.forEach(function(e,j){var N=n+1+j,id='e-rci'+uid(),pr=sePrio(e.gravite);e.refExt='Ecart_'+N;
+    W.push(S.db.collection(SE_COLL).doc(id).set({id:id,n:N,ref:'Ecart_'+N,refExt:'Ecart_'+N,site:site.toUpperCase(),zone:'',origine:'Contrôle RCI',creeLe:String(d.ident.date||today()).slice(0,10),nom:d.ident.controleur||'',
+      famille:String(e.rubrique||'').split(' › ')[0].replace(/ \(.*\)$/,''),sousFamille:'',point:e.point,priorite:pr,criticite:pr==='P1'?'ECART CRITIQUE':'ECART MAJEUR',validationMP:pr==='P1'?'MP REJETEE':'MP ACCEPTEE',
+      act:d.type==='actif'?'actif':'passif',statut:'À affecter',dateCorrection:'',commentaire:e.obs||'',accuseLe:'',echeance:'',origineApp:'rci',ficheRCI:e.ficheId,remontees:[],photos:(e.ph||[]).filter(function(u){return /^https?:|^\//.test(u)}).map(function(u){return {url:u,nom:'Photo RCI'}}),
+      suivi:[{t:now,u:S.uid||'',txt:'Créé depuis un rapport RCI ('+e.ref+')'}],maj:now}))});
+  return Promise.all(W).catch(function(){})}
 function setMode(){
+  var vs=document.getElementById('versSE');if(vs)vs.hidden=!SRV;
   var m=$('#mode');
   if(S.db){m.textContent=modeTxt();m.className='mode on'+(S.hl&&!S.hl.enLigne?' hl':'')}
   else{m.textContent='Enregistré sur cet appareil';m.className='mode on'}
@@ -3190,7 +3239,7 @@ function maintCard(mo,full){var M=mtMonth(mo),st=M.st;if(!S.maint.length)return 
 function viewBord(){
   var mc=migrateCard();
   if(shareEmpty())return mc+'<div class="card"><h2>Le registre partagé est vide</h2><p class="muted" style="margin:0 0 12px">Toutes les personnes qui ont accès à ce lien voient les mêmes rapports, écarts et plannings, en direct. Commencez par importer vos fichiers de suivi et d’écarts, ou ajoutez un premier rapport. La base des sites et le BoQ sont déjà intégrés.</p><div class="bar-actions">'+(S.canWrite?'<button class="btn pri" data-act="goImpAll">Importer des fichiers</button>':'')+'<button class="btn" data-act="goSites">Saisir les sites</button></div></div>';
-  var HUB=hubHTML();
+  var HUB=seBandeau()+hubHTML();
   var E=S.ecarts,F=S.fiches,cur=S.mo||today().slice(0,7);
   var open=E.filter(isOpen),late=E.filter(isLate);
   var crit=open.filter(function(e){return e.gravite==='Critique'});
@@ -3226,7 +3275,7 @@ function viewBord(){
   h+='<div style="margin-top:14px"></div>';
   var hasEx=F.concat(E).some(function(x){return x.exemple});
   h+='<div class="card"><h2>Données</h2>'+(S.db?'<p class="muted" style="margin:0 0 8px">'+(SRV?'Les données sont enregistrées sur le serveur RCI et partagées en direct entre tous les utilisateurs (ordinateurs, téléphones, accès Internet), avec le nom de chaque auteur. Pour reprendre les données d’une ancienne version : faites-y « Sauvegarder (JSON) », puis « Importer une sauvegarde » ici.':'Les données sont partagées en direct entre toutes les personnes qui ont accès à ce lien, avec le nom de chaque auteur.')+' La sauvegarde sert d’archive.</p>':'<p class="muted" style="margin:0 0 8px">Les données sont enregistrées dans ce navigateur. Faites une sauvegarde régulière et importez-la sur un autre appareil : en cas de doublon, la version la plus récente est gardée.</p>')+'<p class="muted" style="margin:0 0 12px">Hors connexion, la saisie des rapports et des photos, le registre, les relances, les réserves et le planning continuent de fonctionner. Le QR code, les fichiers Excel et l’assistant IA demandent une connexion.</p>'+(function(){var lb=lastBackup(),d=lb?daysBetween(lb,today()):null;return '<p style="margin:0 0 12px" class="'+(d==null||d>7?'late-t':'muted')+'">'+(lb?'Dernière sauvegarde le '+fmt(lb)+(d>7?' : pensez à en refaire une.':'.'):'Aucune sauvegarde faite depuis cet appareil.')+'</p>'})()+'<div class="bar-actions"><button class="btn sm" data-act="backup">Sauvegarder (JSON)</button><label class="btn sm filebtn">Importer une sauvegarde<input type="file" id="imp" accept="application/json,.json" data-imp="1"></label>'+(hasEx?'<button class="btn sm" data-act="delEx">Supprimer les exemples</button>':'')+'</div>'+(hasEx?'<p class="muted" style="margin:10px 0 0;font-size:12.5px">Les lignes marquées « Exemple » servent à la démonstration.</p>':'')+'</div>';
-  return h;
+  return h+seIndic()+seJournal();
 }
 
 /* ---------- Nouvelle fiche ---------- */
@@ -3309,7 +3358,7 @@ function saveFiche(){
   var rel=Promise.resolve(null);if(d.type==='passif'&&Object.keys(S.bq.v||{}).some(function(k){return S.bq.v[k]!==''&&S.bq.v[k]!=null})&&bqSite(d.ident.site)&&bqSite(d.ident.site).code===S.bq.site)rel=bqSave(true);else if(d.type==='actif'&&low(S.bqa.site)===low(d.ident.site)&&Object.keys(S.bqa.v||{}).length)rel=bqaSave();
   rel.then(function(r){if(r){fiche.releveId=r.id}return put('fiches',fiche)}).then(function(ok){
     if(!ok){btn.disabled=false;return}
-    return Promise.all(ecs.map(function(e){return put('ecarts',e)})).then(function(){
+    return seApresFiche(d,ecs).then(function(){return Promise.all(ecs.map(function(e){return put('ecarts',e)}))}).then(function(){
       delete S.drafts[curTpl()];
       toast('Rapport enregistré'+(ecs.length?' · '+ecs.length+' écart'+(ecs.length>1?'s':'')+' créé'+(ecs.length>1?'s':''):''));
       S.tab=ecs.length?'reg':'fiches';
@@ -3376,7 +3425,7 @@ function viewReg(){
    '</div></div>';
   h+=vuesHTML()+seNote();
   h+='<div class="bar-actions" style="justify-content:space-between"><span class="muted">'+L.length+' écart'+(L.length>1?'s':'')+' affiché'+(L.length>1?'s':'')+(S.canWrite&&L.length?' <button class="btn sm" data-act="selTous" style="margin-left:6px">Tout sélectionner ('+L.length+')</button>':'')+'</span>'+
-     '<span class="bar-actions"><button class="btn sm" data-act="impEcarts">Importer des écarts</button><button class="btn sm" data-act="toggleNew">'+(S.showNew?'Fermer':'Ajouter un écart')+'</button>'+(S.dl?'<button class="btn sm" data-act="csv">Exporter en CSV</button><button class="btn sm" data-act="regXlsx">Exporter en Excel (sélection)</button>':'')+'</span></div>';
+     '<span class="bar-actions">'+(seOn()?'':'<button class="btn sm" data-act="impEcarts">Importer des écarts</button>')+'<button class="btn sm" data-act="toggleNew">'+(S.showNew?'Fermer':'Ajouter un écart')+'</button>'+(S.dl?'<button class="btn sm" data-act="csv">Exporter en CSV</button><button class="btn sm" data-act="regXlsx">Exporter en Excel (sélection)</button>':'')+'</span></div>';
   if(S.showNew){
     var n=S.newE;
     h+='<div class="card"><h2>Nouvel écart</h2><div class="idgrid">'+
@@ -3398,7 +3447,7 @@ function viewReg(){
   h+='<div class="tablewrap"><table><thead><tr><th><input type="checkbox" id="sel-all" data-selall="1" aria-label="Tout sélectionner"></th><th>Réf.</th><th>Activité · site</th><th>Écart</th><th>Gravité</th><th>Responsable</th><th>Échéance</th><th>Statut</th><th>Preuve de clôture</th></tr></thead><tbody>'+
   L.map(function(e){
     var d=e.id;
-    return '<tr class="'+(isLate(e)?'late':'')+'"><td><input type="checkbox" data-selid="'+d+'"'+(S.sel[d]?' checked':'')+' aria-label="Sélectionner '+esc(e.ref)+'"></td><td class="mono">'+esc(e.ref)+'<br><button class="btn sm" style="margin-top:6px" data-act="edOpen" data-coll="ecarts" data-id="'+d+'">Modifier</button>'+ecBtns(e)+'</td>'+
+    return '<tr class="'+(isLate(e)?'late':'')+'"><td><input type="checkbox" data-selid="'+d+'"'+(S.sel[d]?' checked':'')+' aria-label="Sélectionner '+esc(e.ref)+'"></td><td class="mono">'+esc(e.ref)+'<br>'+(e.se?'<a class="btn sm" style="margin-top:6px" href="'+seUrl('e='+encodeURIComponent(e.refExt||e.ref))+'">Ouvrir dans Suivi des écarts</a>':'<button class="btn sm" style="margin-top:6px" data-act="edOpen" data-coll="ecarts" data-id="'+d+'">Modifier</button>')+ecBtns(e)+'</td>'+
      '<td>'+esc(ACT[e.type]||'')+'<br><b>'+esc(e.site)+'</b>'+(e.siteNom&&e.siteNom!==e.site?'<small style="display:block">'+esc(e.siteNom)+'</small>':'')+exTag(e)+'<small style="display:block;margin-top:2px" class="'+(e.prestataire?'muted':'late-t')+'">'+(e.prestataire?'Prestataire : '+esc(e.prestataire):'Prestataire à définir')+'</small>'+acPill(e)+ecPills(e)+'</td>'+
      '<td class="desc">'+esc(e.point)+'<small>'+esc(e.rubrique||'')+(e.obs?' · '+esc(e.obs):'')+'</small>'+histHTML(e)+'</td>'+
      '<td><span class="pill '+gcls(e.gravite)+'">'+esc(e.gravite)+'</span>'+(e.priorite?'<small style="display:block;margin-top:4px" class="muted">'+esc(e.priorite)+(e.validationMP?' · MP '+esc(e.validationMP.toLowerCase()):'')+'</small>':'')+'</td>'+
@@ -3411,7 +3460,7 @@ function viewReg(){
 }
 function cardsHTML(L){
   return '<div class="cards">'+L.map(function(e){var d=e.id;
-    return '<div class="ecard'+(isLate(e)?' late':'')+'"><div class="hd"><input type="checkbox" data-selid="'+d+'"'+(S.sel[d]?' checked':'')+' aria-label="Sélectionner '+esc(e.ref)+'"><span class="mono">'+esc(e.ref)+'</span><button class="btn sm" style="margin-left:auto" data-act="edOpen" data-coll="ecarts" data-id="'+d+'">Modifier</button></div><div class="hd"><span class="mono" hidden>'+esc(e.ref)+'</span><span class="pill '+gcls(e.gravite)+'">'+esc(e.gravite)+'</span>'+(isLate(e)?'<span class="late-t">En retard</span>':'')+exTag(e)+'</div>'+
+    return '<div class="ecard'+(isLate(e)?' late':'')+'"><div class="hd"><input type="checkbox" data-selid="'+d+'"'+(S.sel[d]?' checked':'')+' aria-label="Sélectionner '+esc(e.ref)+'"><span class="mono">'+esc(e.ref)+'</span>'+(e.se?'<a class="btn sm" style="margin-left:auto" href="'+seUrl('e='+encodeURIComponent(e.refExt||e.ref))+'">Ouvrir dans Suivi des écarts</a>':'<button class="btn sm" style="margin-left:auto" data-act="edOpen" data-coll="ecarts" data-id="'+d+'">Modifier</button>')+'</div><div class="hd"><span class="mono" hidden>'+esc(e.ref)+'</span><span class="pill '+gcls(e.gravite)+'">'+esc(e.gravite)+'</span>'+(isLate(e)?'<span class="late-t">En retard</span>':'')+exTag(e)+'</div>'+
     '<div><b>'+esc(e.site)+'</b>'+(e.siteNom&&e.siteNom!==e.site?' · '+esc(e.siteNom):'')+' · '+esc(ACT[e.type]||'')+(e.priorite?' · '+esc(e.priorite):'')+'<br>'+esc(e.point)+'<div class="muted">'+esc(e.rubrique||'')+(e.obs?' · '+esc(e.obs):'')+'</div><div class="'+(e.prestataire?'muted':'late-t')+'" style="font-size:13px">'+(e.prestataire?'Prestataire : '+esc(e.prestataire):'Prestataire à définir')+'</div>'+acPill(e)+ecPills(e)+histHTML(e)+ecBtns(e)+'</div>'+
     (e.ph&&e.ph.length?'<div class="thumbs">'+e.ph.map(function(u){return '<img src="'+u+'" alt="Photo">'}).join('')+'</div>':'')+
     '<div class="fg"><label class="f">Responsable<input type="text" id="r-'+d+'" data-ed="'+d+'" data-f="responsable" value="'+esc(e.responsable)+'"></label>'+
@@ -4326,7 +4375,7 @@ function viewSite(s){
   h+='<div class="grid g2" style="margin-top:12px"><div class="card"><div class="sumbar" style="margin-bottom:12px"><h2><span class="mono" style="font-size:16px">'+esc(s.code)+'</span>'+exTag(s)+'</h2></div><div class="dl">'+
     [['Région',s.region],['Énergie',s.energie],['Puissance',s.puissance?s.puissance+' kVA':''],['Nom',s.nom||(baseSite(s.code)||{}).nom],['Type',s.type],['Implantation',s.implant||(baseSite(s.code)||{}).implant],['Priorité',prioOf(s)],['Catégorie',catOf(s)?CATLAB[catOf(s)]||catOf(s):''],['Configuration cible',cfgOf(s)],['Plage de puissance Telco',s.lb?s.lb+' W':''],['Incidents sur 6 mois',s.incidents],['Dernier contrôle niveau 1',fmt(s.dernierN1)],['Dernier contrôle niveau 2',fmt(last)]].map(function(p){return '<div><span>'+p[0]+'</span><b>'+esc(p[1]===''||p[1]==null?'—':p[1])+'</b></div>'}).join('')+
     '</div><div class="bar-actions" style="margin-top:14px">'+TYPES.map(function(t){return '<button class="btn sm'+(t===S.type?' pri':'')+'" data-act="siteFiche" data-type="'+t+'" data-code="'+esc(s.code)+'">Rapport '+esc(TPL[t].nom.toLowerCase())+'</button>'}).join('')+'<button class="btn sm" data-act="bqGo" data-code="'+esc(s.code)+'">Comparer au BoQ</button></div></div>'+
-    '<div class="card"><h2>QR code du site</h2><div class="qrwrap"><div id="qr" class="qr" aria-label="QR code du site"></div><div><p class="muted" style="margin:0 0 10px">Collé sur le site, il ouvre cette fiche dans la version en ligne de l’application, avec l’historique des contrôles et des écarts.</p><button class="btn sm" data-act="qrPng" data-code="'+esc(s.code)+'">Télécharger l’étiquette</button></div></div></div></div>';
+    seSite(s.code)+'<div class="card"><h2>QR code du site</h2><div class="qrwrap"><div id="qr" class="qr" aria-label="QR code du site"></div><div><p class="muted" style="margin:0 0 10px">Collé sur le site, il ouvre cette fiche dans la version en ligne de l’application, avec l’historique des contrôles et des écarts.</p><button class="btn sm" data-act="qrPng" data-code="'+esc(s.code)+'">Télécharger l’étiquette</button></div></div></div></div>';
   var cf=cfgOf(s),B=boqOf(cf),rw=B&&(boqRow(B,s.lb)||B.rows[0]);
   h+='<div class="card" style="margin-top:14px"><h2>Configuration cible (BoQ technique)</h2>'+(!cf?'<div class="empty">Aucune configuration cible renseignée pour ce site.</div>':!B?'<p class="muted" style="margin:0">Configuration '+esc(cf)+' : '+(boqAvail()?'absente du BoQ technique.':'le détail du BoQ est disponible dans les fichiers web et mobile.')+'</p>':
     '<p style="margin:0 0 10px"><b>'+esc(cf)+'</b> · '+esc(B.grp||'')+' · '+esc(B.lib)+'</p>'+(rw?'<div class="dl">'+[['Plage de puissance',rw[0]+' W'],['Solaire installé',String(rw[1]).replace('.',',')+' kWc ('+rw[2]+' modules)'],['Batteries',(rw[3]||'')+' · '+rw[4]+' Ah'],['Autonomie à 80 % DOD',String(rw[5]).replace('.',',')+' h'],['Redresseurs',rw[6]+' kW'],['Convertisseurs solaires',rw[7]+' kW'],['Groupe électrogène',rw[9]?(rw[8]||'')+' '+rw[9]+' kVA, '+rw[10]+' h/an':'aucun'],['Fuel prévu',(rw[11]||0)+' L/an'],['Réseau prévu',(rw[13]||0)+' kWh/an'],['Part solaire (RER)',rw[14]!=null?Math.round(rw[14]*100)+' %':'—']].map(function(p){return '<div><span>'+p[0]+'</span><b>'+esc(p[1])+'</b></div>'}).join('')+'</div>'+(s.lb?'':'<p class="muted" style="margin:8px 0 0;font-size:12.5px">Plage de puissance Telco non renseignée : valeurs de la plus petite plage. Renseignez-la dans « Modifier le site ».</p>'):'')+
@@ -5501,6 +5550,7 @@ document.addEventListener('click',function(ev){
   else if(a==='siteNew'){S.siteNew=!S.siteNew;render()}
   else if(a==='siteOpen'){S.siteSel=b.dataset.code;render();window.scrollTo(0,0)}
   else if(a==='siteBack'){S.siteSel=null;render()}
+  else if(a==='seVu'){try{localStorage.setItem('rci_se_vu',new Date().toISOString())}catch(x){}render()}
   else if(a==='siteFiche')startFiche(b.dataset.type,b.dataset.code);
   else if(a==='qrPng')qrPng(b.dataset.code);
   else if(a==='siteAdd'){var F=S.siteForm,code=String(F.code||'').trim();
@@ -7353,7 +7403,7 @@ function viewJour(){var qui=moiNom(),j=today(),P=mesCtl(),B=brouillons();
   var sites={};P.forEach(function(p){sites[p.site]=p});
   var J=['dimanche','lundi','mardi','mercredi','jeudi','vendredi','samedi'];
   var h='<div class="card"><div class="sumbar"><div><h2>Ma journée · '+J[new Date(j+'T00:00:00Z').getUTCDay()]+' '+fmt(j)+'</h2><p class="muted" style="margin:4px 0 0">Ce qui vous attend aujourd’hui : contrôles à faire, rapports commencés, écarts des sites visités.</p></div>'+
-    '<div class="bar-actions">'+(S.canWrite?'<button class="btn sm pri" data-act="jourEcart" data-site="">+ Écart</button>':'')+'<button class="btn sm" data-tab="sem">Ma semaine</button></div></div></div>';
+    '<div class="bar-actions">'+(S.canWrite?'<button class="btn sm pri" data-act="jourEcart" data-site="">+ Écart</button>':'')+'<button class="btn sm" data-tab="sem">Ma semaine</button></div></div></div>'+seMesMissions()+seRappels();
   h+='<div class="grid g4" style="margin-top:14px"><div class="card kpi"><span class="v">'+P.filter(function(p){return p.date===j}).length+'</span><span class="l">Contrôles prévus aujourd’hui</span></div><div class="card kpi'+(P.some(function(p){return p.date<j})?' bad':'')+'"><span class="v">'+P.filter(function(p){return p.date<j}).length+'</span><span class="l">Contrôles en retard</span></div><div class="card kpi"><span class="v">'+B.length+'</span><span class="l">Rapports commencés</span></div><div class="card kpi'+(mesRet?' warn':'')+'"><span class="v">'+mesRet+'</span><span class="l">Mes écarts en retard</span></div></div>';
   if(!qui)h+='<div class="card empty" style="margin-top:14px">Renseignez votre nom dans « '+(SRV?'Mon compte':'Profil d’accès')+' » pour voir vos contrôles.</div>';
   if(B.length)h+='<div class="card" style="margin-top:14px"><h2>Rapports commencés</h2><div class="list">'+B.map(function(x){return '<div class="row prow"><div class="main"><span><b class="mono">'+esc(x.d.ident.site)+'</b> · '+esc((TPL[x.d.tpl]&&TPL[x.d.tpl].nom)||ACT[x.d.type]||x.d.type)+'</span><span class="muted">'+x.n+' point'+(x.n>1?'s':'')+' coté'+(x.n>1?'s':'')+'</span></div><div class="side"><button class="btn sm pri" data-act="jourDraft" data-k="'+esc(x.k)+'">Reprendre</button></div></div>'}).join('')+'</div></div>';
