@@ -3129,7 +3129,7 @@ function subscribe(){
 var SE_COLL='se_ecarts';S._ecR=[];S._se=[];
 function seGrav(p){return p==='P1'?'Critique':p==='P3'||p==='P4'?'Mineure':'Majeure'}
 function seStatut(s){return s==='SOLDE'?'Clos':s==='EN COURS'?'En cours':'Ouvert'}
-function seVers(x){var act=x.act==='actif'?'actif':'passif',P=PREST_FIX[act]||prestOf(act),site=String(x.site||'').trim(),st=seStatut(x.statut),fam=x.famille||'',sf=x.sousFamille||'',cr=String(x.creeLe||'').slice(0,10);
+function seVers(x){var act=x.act==='actif'?'actif':'passif',P=PREST_FIX[act]||prestOf(act),site=String(x.site||'').trim()||'Site non renseigné',st=seStatut(x.statut),fam=x.famille||'',sf=x.sousFamille||'',cr=String(x.creeLe||'').slice(0,10);
   var obs=[x.commentaire,x.priorite?'Priorité '+x.priorite:'',x.statut==='À affecter'?'À affecter au prestataire':'',x.lot?'Lot '+x.lot:'',x.accuseLe?'Accusé de réception le '+fmt(x.accuseLe):'',x.corrDeclaree&&st!=='Clos'?'Correction déclarée le '+fmt(x.corrDeclaree)+', à contrôler':''].filter(Boolean).join(' · ');
   var o={id:'se:'+x.id,se:1,n:0,ref:x.ref||x.id,refExt:x.ref||'',type:act,site:site,siteNom:x.siteNom||'',region:x.region||PREG[site.slice(0,3).toUpperCase()]||'',zone:x.zone||'',
     rubrique:(fam||'Contrôle')+(sf&&sf!==fam?' › '+sf:''),famille:fam,sousFamille:sf,point:x.point||'',obs:obs,gravite:seGrav(x.priorite),priorite:x.priorite||'',origine:x.origine||'',
@@ -3138,7 +3138,7 @@ function seVers(x){var act=x.act==='actif'?'actif':'passif',P=PREST_FIX[act]||pr
   if(st==='Clos')o.cloLe=x.dateCorrection||String(x.maj||'').slice(0,10);
   return o}
 function seFusion(){var R=S._ecR||[];if(!S._se.length)return R;
-  var L=S._se.filter(function(x){return x&&!x.exemple&&x.statut!=='Fusionné'&&x.site&&x.point}).map(seVers),cle={};
+  var L=S._se.filter(function(x){return x&&!x.exemple&&x.statut!=='Fusionné'&&x.point}).map(seVers),cle={};
   L.forEach(function(e){if(e.refExt){cle[low(e.refExt)]=1;cle['mq:'+low(e.refExt)]=1}});
   return R.filter(function(e){return !(e.refExt&&cle[low(e.refExt)])}).concat(L)}
 function seAbonner(){if(!S.db)return;
